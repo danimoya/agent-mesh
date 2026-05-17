@@ -57,7 +57,7 @@ jobs:
           FORCE_SEND=1 ~/bin/notify-pane selfhost-smoketest-alpha --file /tmp/test-manifest.txt "fyi"
           sleep 1
           ls -la ~/.agent-inbox/
-          tmux capture-pane -p -t smoketest:alpha | grep -q 'file dropped at .* test-manifest.txt'
+          tmux capture-pane -p -t smoketest:alpha | grep -q 'file dropped at .*test-manifest.txt'
       - name: Assert window-rename re-registers
         run: |
           tmux rename-window -t smoketest:beta gamma
