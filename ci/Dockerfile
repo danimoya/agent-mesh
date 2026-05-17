@@ -1,8 +1,17 @@
-FROM alpine:3.20
+FROM debian:bookworm-slim
 
-RUN apk add --no-cache bash tmux openssh openssh-server rsync python3 git sudo coreutils \
+# Note: glibc-based. Alpine + musl + sshd privsep had a known "invalid user
+# at preauth" issue that bit our two-host CI; switching to Debian sidesteps it.
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      bash tmux openssh-server openssh-client rsync python3 git sudo \
+      iproute2 ca-certificates procps \
+ && rm -rf /var/lib/apt/lists/* \
  && ssh-keygen -A \
- && adduser -D -s /bin/bash mesh \
+ && useradd -m -s /bin/bash mesh \
  && echo 'mesh ALL=(root) NOPASSWD: /usr/sbin/sshd' > /etc/sudoers.d/mesh \
  && mkdir -p /run/sshd \
  && printf '%s\n' \
@@ -14,7 +23,8 @@ RUN apk add --no-cache bash tmux openssh openssh-server rsync python3 git sudo c
       'StrictModes no' \
       'LogLevel VERBOSE' \
       'AuthorizedKeysFile .ssh/authorized_keys' \
-      'Subsystem sftp /usr/lib/ssh/sftp-server' \
+      'UsePAM no' \
+      'Subsystem sftp /usr/lib/openssh/sftp-server' \
     > /etc/ssh/sshd_config
 
 # One keypair baked into the image — every container inherits the same key and
@@ -30,7 +40,6 @@ USER root
 COPY --chown=mesh:mesh . /opt/agent-mesh
 RUN chmod +x /opt/agent-mesh/ci/*.sh
 
-# Run as mesh user with sshd started in background.
 USER mesh
 WORKDIR /home/mesh
 ENTRYPOINT ["/opt/agent-mesh/ci/entrypoint.sh"]
