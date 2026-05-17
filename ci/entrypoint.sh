@@ -9,9 +9,12 @@ chmod 700 ~/.ssh                       2>/dev/null || true
 chmod 600 ~/.ssh/authorized_keys       2>/dev/null || true
 chmod 600 ~/.ssh/id_ed25519            2>/dev/null || true
 
-# Start sshd in background; -e routes its log to stderr so docker logs catch it
-sudo /usr/sbin/sshd -e
-sleep 1
+# -D keeps sshd in the foreground so daemon() doesn't close stdio; -e routes
+# log to stderr; & backgrounds the shell job. Captures auth-level traces in
+# `docker compose up` output.
+sudo /usr/sbin/sshd -D -e &
+SSHD_PID=$!
+sleep 2
 
 # Diagnose: is sshd actually up?
 echo "=== $(hostname): sshd status ===" >&2

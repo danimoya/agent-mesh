@@ -14,7 +14,6 @@ RUN apk add --no-cache bash tmux openssh openssh-server rsync python3 git sudo c
       'StrictModes no' \
       'LogLevel VERBOSE' \
       'AuthorizedKeysFile .ssh/authorized_keys' \
-      'UsePAM no' \
       'Subsystem sftp /usr/lib/ssh/sftp-server' \
     > /etc/ssh/sshd_config
 
