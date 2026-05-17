@@ -20,6 +20,14 @@ echo "=== $(hostname): sshd status ===" >&2
 pgrep -fa sshd >&2 || echo "  NO sshd processes!" >&2
 ss -ltn 'sport = :22' 2>&1 | tail -n +2 | head >&2 || true
 
+# Diagnose: is the 'mesh' user actually visible to sshd?
+echo "=== $(hostname): user lookup ===" >&2
+echo "  /etc/passwd mesh: $(grep ^mesh: /etc/passwd || echo 'MISSING')" >&2
+echo "  /etc/shadow mesh: $(sudo head -1 /etc/shadow 2>/dev/null | head -c 0; sudo grep ^mesh: /etc/shadow 2>/dev/null | cut -d: -f1-2 || echo 'unreadable')" >&2
+echo "  getent passwd mesh: $(getent passwd mesh || echo 'MISSING')" >&2
+echo "  id mesh: $(id mesh 2>&1)" >&2
+echo "  whoami: $(whoami) ($(id))" >&2
+
 # Self-ssh sanity check — same image, same keypair, should always work
 echo "=== $(hostname): self-ssh test ===" >&2
 ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \

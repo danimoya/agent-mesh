@@ -23,7 +23,7 @@ RUN apt-get update \
       'StrictModes no' \
       'LogLevel VERBOSE' \
       'AuthorizedKeysFile .ssh/authorized_keys' \
-      'UsePAM no' \
+      'UsePAM yes' \
       'Subsystem sftp /usr/lib/openssh/sftp-server' \
     > /etc/ssh/sshd_config
 
