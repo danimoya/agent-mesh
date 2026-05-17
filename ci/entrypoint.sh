@@ -13,7 +13,6 @@ chmod 600 ~/.ssh/id_ed25519            2>/dev/null || true
 # log to stderr; & backgrounds the shell job. Captures auth-level traces in
 # `docker compose up` output.
 sudo /usr/sbin/sshd -D -e &
-SSHD_PID=$!
 sleep 2
 
 # Diagnose: is sshd actually up?
