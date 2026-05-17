@@ -4,7 +4,19 @@ RUN apk add --no-cache bash tmux openssh openssh-server rsync python3 git sudo c
  && ssh-keygen -A \
  && adduser -D -s /bin/bash mesh \
  && echo 'mesh ALL=(root) NOPASSWD: /usr/sbin/sshd' > /etc/sudoers.d/mesh \
- && mkdir -p /run/sshd
+ && mkdir -p /run/sshd \
+ && printf '%s\n' \
+      'Port 22' \
+      'PubkeyAuthentication yes' \
+      'PasswordAuthentication no' \
+      'PermitEmptyPasswords no' \
+      'PermitRootLogin no' \
+      'StrictModes no' \
+      'LogLevel VERBOSE' \
+      'AuthorizedKeysFile .ssh/authorized_keys' \
+      'UsePAM no' \
+      'Subsystem sftp /usr/lib/ssh/sftp-server' \
+    > /etc/ssh/sshd_config
 
 # One keypair baked into the image — every container inherits the same key and
 # the same authorized_keys, so SSH between containers works out of the box.
