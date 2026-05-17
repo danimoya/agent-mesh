@@ -75,7 +75,12 @@ else
 fi
 
 # 4. systemd user resync timer (optional)
-if command -v systemctl >/dev/null 2>&1 && systemctl --user --no-pager 2>/dev/null | head -1 >/dev/null; then
+# Make sure XDG_RUNTIME_DIR is set; without it, `systemctl --user` can't find
+# the user bus even on systems where it's running.
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+if command -v systemctl >/dev/null 2>&1 && [ -d "$XDG_RUNTIME_DIR" ] \
+   && systemctl --user is-system-running >/dev/null 2>&1 \
+        || systemctl --user list-units --type=service --no-pager >/dev/null 2>&1; then
   UNITDIR="$HOME/.config/systemd/user"
   mkdir -p "$UNITDIR"
   install -m 0644 "$HERE_SYSTEMD/agent-resync.service" "$UNITDIR/agent-resync.service"
