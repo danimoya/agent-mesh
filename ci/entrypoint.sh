@@ -11,6 +11,19 @@ chmod 600 ~/.ssh/id_ed25519            2>/dev/null || true
 
 # Start sshd in background; -e routes its log to stderr so docker logs catch it
 sudo /usr/sbin/sshd -e
+sleep 1
+
+# Diagnose: is sshd actually up?
+echo "=== $(hostname): sshd status ===" >&2
+pgrep -fa sshd >&2 || echo "  NO sshd processes!" >&2
+ss -ltn 'sport = :22' 2>&1 | tail -n +2 | head >&2 || true
+
+# Self-ssh sanity check — same image, same keypair, should always work
+echo "=== $(hostname): self-ssh test ===" >&2
+ssh -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    -o LogLevel=ERROR \
+    localhost 'echo "  self-ssh OK on $(hostname)"' 2>&1 >&2 \
+    || echo "  self-ssh FAILED on $(hostname)" >&2
 
 # StrictHostKeyChecking off — every container's host key is the same baked one.
 mkdir -p ~/.ssh
