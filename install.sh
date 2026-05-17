@@ -68,7 +68,7 @@ else
   {
     echo ""
     echo "# === agent-mesh tmux hooks (managed) ==="
-    cat "$HERE_TMUX/hooks.conf" | grep -v '^#' | grep -v '^$'
+    grep -vE '^#|^$' "$HERE_TMUX/hooks.conf"
   } >> "$HOME/.tmux.conf"
   if command -v tmux >/dev/null 2>&1 && tmux info >/dev/null 2>&1; then
     tmux source-file "$HOME/.tmux.conf" 2>/dev/null || true
