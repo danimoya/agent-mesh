@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# notify-pane — send a tagged message (or file) to a peer CLI agent running
+# in a tmux pane, locally or on a mesh peer host. Address book at
+# ~/.agents/registry.toml (auto-maintained by agent-register-hook).
+#
+# Usage:
+#   notify-pane <agent> "<message body>"
+#   notify-pane <agent> --file <path> ["<optional body>"]
+#   notify-pane --list
+#   notify-pane --whoami
+#
+# --file <path>: scp the file to the recipient host at
+#   ~/.agent-inbox/<sender>/<basename>, then deliver a one-line notification
+#   "file dropped at <path> (N bytes)". The recipient agent reads the file
+#   from its own filesystem.
+#
+# Env:
+#   AGENT_NAME      sender identity (e.g. "<host>-<session>-<window>"); auto-
+#                   detected from hostname + current tmux session if unset.
+#   FORCE_SEND=1    skip the mid-prompt safety check on the recipient.
+#
+# Exit codes:
+#   0  delivered
+#   1  usage / missing args / unreadable --file
+#   2  agent not in ~/.agents/registry.toml
+#   3  recipient looks mid-prompt; refused (set FORCE_SEND=1 to override)
+#   4  ssh/tmux failure on the wire
+set -euo pipefail
+
+REGISTRY="${HOME}/.agents/registry.toml"
+TMUX_BIN="${TMUX_BIN:-tmux}"
+TMUX_SOCKET="${TMUX_SOCKET:-/tmp/tmux-$(id -u)/default}"
+
+usage() {
+  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' >&2
+  exit 1
+}
+
+lookup() {
+  local name="$1" field="$2"
+  awk -v want="$name" -v field="$field" '
+    /^\[agents\./ {
+      h = $0; gsub(/[][]/, "", h); split(h, a, ".")
+      in_block = (a[1] == "agents" && a[2] == want)
+      next
+    }
+    /^\[/ { in_block = 0 }
+    in_block && $0 ~ "^[[:space:]]*" field "[[:space:]]*=" {
+      sub(/^[^=]*=[[:space:]]*/, "")
+      gsub(/^"|"$/, "")
+      print
+      exit
+    }
+  ' "$REGISTRY"
+}
+
+list_agents() {
+  sed -n 's/^\[agents\.\([^]]\+\)\].*/\1/p' "$REGISTRY"
+}
+
+self_alias() {
+  if [ -r "${HOME}/.agents/self.conf" ]; then
+    head -1 "${HOME}/.agents/self.conf" | sed 's/[[:space:]]//g'
+  else
+    hostname -s
+  fi
+}
+
+sender_id() {
+  if [ -n "${AGENT_NAME:-}" ]; then echo "$AGENT_NAME"; return; fi
+  local h s
+  h=$(self_alias)
+  if s=$(tmux -S "$TMUX_SOCKET" display-message -p '#S' 2>/dev/null); then
+    echo "${h}[${s}]"
+  else
+    echo "$h"
+  fi
+}
+
+is_self() {
+  [ "$1" = "$(self_alias)" ]
+}
+
+run_tmux() {
+  local host="$1"; shift
+  if is_self "$host"; then
+    "$TMUX_BIN" -S "$TMUX_SOCKET" "$@"
+  else
+    local cmd="$TMUX_BIN -S $TMUX_SOCKET"
+    local a
+    for a in "$@"; do cmd+=" $(printf '%q' "$a")"; done
+    ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" "$cmd"
+  fi
+}
+
+case "${1:-}" in
+  --list)   list_agents; exit 0 ;;
+  --whoami) sender_id; exit 0 ;;
+  -h|--help) usage ;;
+  '')       usage ;;
+esac
+
+agent="${1:-}"; shift || true
+file=""
+case "${1:-}" in
+  -f|--file) file="${2:-}"; shift 2 ;;
+esac
+body="$*"
+
+if [ -z "$agent" ] || { [ -z "$body" ] && [ -z "$file" ]; }; then
+  usage
+fi
+
+host=$(lookup "$agent" "host")
+target=$(lookup "$agent" "target")
+if [ -z "$host" ] || [ -z "$target" ]; then
+  echo "notify-pane: unknown agent '$agent' — try --list" >&2
+  exit 2
+fi
+
+remote_path=""
+if [ -n "$file" ]; then
+  [ -r "$file" ] || { echo "notify-pane: cannot read $file" >&2; exit 1; }
+  sender=$(sender_id | tr ' []' '_')
+  basename=$(basename -- "$file")
+  remote_path_display="~/.agent-inbox/${sender}/${basename}"
+  if is_self "$host"; then
+    mkdir -p "$HOME/.agent-inbox/${sender}"
+    cp -f "$file" "$HOME/.agent-inbox/${sender}/${basename}"
+  else
+    ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" "mkdir -p ~/.agent-inbox/${sender}"
+    scp -q -o BatchMode=yes -o ConnectTimeout=5 "$file" "$host:.agent-inbox/${sender}/${basename}"
+  fi
+  drop_note="file dropped at ${remote_path_display} ($(wc -c < "$file") bytes)"
+  if [ -n "$body" ]; then body="${drop_note}: ${body}"; else body="${drop_note}"; fi
+fi
+
+tag="[from $(sender_id) @ $(date -u +%Y-%m-%dT%H:%M:%SZ)]"
+
+if [ "${FORCE_SEND:-}" != "1" ]; then
+  pane=$(run_tmux "$host" capture-pane -p -t "$target" 2>/dev/null | tail -3 || true)
+  if echo "$pane" | grep -qE '[❯>][[:space:]]*[^[:space:]]'; then
+    echo "notify-pane: recipient '$agent' looks mid-prompt; refusing. Last lines:" >&2
+    echo "$pane" >&2
+    echo "(re-run with FORCE_SEND=1 to override)" >&2
+    exit 3
+  fi
+fi
+
+if ! run_tmux "$host" send-keys -t "$target" -l "$tag $body"; then
+  echo "notify-pane: send-keys failed for '$agent' ($host[$target])" >&2
+  exit 4
+fi
+if ! run_tmux "$host" send-keys -t "$target" Enter; then
+  echo "notify-pane: send-keys Enter failed for '$agent' ($host[$target])" >&2
+  exit 4
+fi
+
+echo "→ $agent ($host[$target]): $body"

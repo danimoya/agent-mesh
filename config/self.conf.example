@@ -1,0 +1,6 @@
+# self.conf — this host's alias in the agent-mesh.
+#
+# A single line, matching one of the entries in peers.conf. If this file is
+# absent the scripts fall back to `hostname -s`, but a short alias is usually
+# clearer (e.g. "hub" instead of "ip-10-0-1-42").
+hub

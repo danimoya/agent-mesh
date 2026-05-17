@@ -1,0 +1,11 @@
+[Unit]
+Description=Run agent-resync every 5 minutes (safety net against missed hooks)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=15s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

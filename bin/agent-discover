@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# agent-discover — re-register every currently-running tmux session+windows
+# through the agent-register-hook. Useful after install or to recover from
+# a missed hook. Idempotent.
+set -euo pipefail
+
+TMUX_SOCKET="${TMUX_SOCKET:-/tmp/tmux-$(id -u)/default}"
+
+if ! tmux -S "$TMUX_SOCKET" ls >/dev/null 2>&1; then
+  echo "agent-discover: no tmux server on $TMUX_SOCKET"
+  exit 0
+fi
+
+n_s=0
+n_w=0
+while IFS= read -r s; do
+  [ -n "$s" ] || continue
+  ~/bin/agent-register-hook on "$s"
+  n_s=$((n_s+1))
+  n_w=$((n_w + $(tmux -S "$TMUX_SOCKET" list-windows -t "$s" 2>/dev/null | wc -l)))
+done < <(tmux -S "$TMUX_SOCKET" ls -F '#{session_name}')
+
+echo "agent-discover: ${n_s} session(s), ${n_w} window(s) on $(hostname -s); running sync"
+~/scripts/sync-agent-registry.sh

@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# agent-register-hook — per-window registration in ~/.agents/local.toml.
+# Invoked by tmux hooks on session/window create/close/rename. Re-discovers
+# the affected session and writes one [agents.<host>-<session>-<slug>] block
+# per window.
+#
+# Args:
+#   on  <session>   re-register every window of <session>
+#   off <session>   remove every entry under <session>
+#
+# Address scheme: <host>-<session>-<slug(window-name)>
+# tmux target:    <session>:<window-index>
+# Role/scope:     window-level @agent-role/@agent-scope wins over session-level.
+set -euo pipefail
+
+action="${1:-}"
+session="${2:-}"
+[ -z "$action" ] || [ -z "$session" ] && exit 0
+
+LOCAL_TOML="${HOME}/.agents/local.toml"
+mkdir -p "$(dirname "$LOCAL_TOML")"
+touch "$LOCAL_TOML"
+
+case "$session" in
+  scratch|tmp|temp|test|test-*|_*) exit 0 ;;
+esac
+
+self_alias() {
+  if [ -r "${HOME}/.agents/self.conf" ]; then
+    head -1 "${HOME}/.agents/self.conf" | sed 's/[[:space:]]//g'
+  else
+    hostname -s
+  fi
+}
+HOST_ALIAS=$(self_alias)
+PREFIX="${HOST_ALIAS}-${session}-"
+
+slug() {
+  echo "$1" | tr '[:upper:]' '[:lower:]' \
+            | sed 's/[^a-z0-9]\+/-/g; s/^-//; s/-$//' \
+            | head -c 40
+}
+
+strip_prefix() {
+  awk -v pfx="$PREFIX" '
+    /^\[agents\./ {
+      h = $0; gsub(/[][]/, "", h); split(h, a, ".")
+      drop = (a[1] == "agents" && index(a[2], pfx) == 1)
+      if (drop) next
+    }
+    /^\[/ && !/^\[agents\./ { drop = 0 }
+    drop { next }
+    { print }
+  ' "$1"
+}
+
+tmp=$(mktemp "${LOCAL_TOML}.XXXXXX")
+strip_prefix "$LOCAL_TOML" > "$tmp"
+
+if [ "$action" = "on" ] && command -v tmux >/dev/null 2>&1 \
+                       && tmux has-session -t "$session" 2>/dev/null; then
+  s_role=$(tmux  show-options -v -t "$session" @agent-role  2>/dev/null || true)
+  s_scope=$(tmux show-options -v -t "$session" @agent-scope 2>/dev/null || true)
+
+  while IFS='|' read -r widx wname; do
+    [ -n "$widx" ] || continue
+    wslug=$(slug "$wname")
+    [ -z "$wslug" ] && wslug="win${widx}"
+    address="${PREFIX}${wslug}"
+    target="${session}:${widx}"
+
+    w_role=$(tmux  show-options -wv -t "${session}:${widx}" @agent-role  2>/dev/null || true)
+    w_scope=$(tmux show-options -wv -t "${session}:${widx}" @agent-scope 2>/dev/null || true)
+    role="${w_role:-${s_role}}"
+    scope="${w_scope:-${s_scope}}"
+    [ -z "$role"  ] && role="(unconfigured — set with: tmux set-option -w -t ${session}:${widx} @agent-role \"...\")"
+    [ -z "$scope" ] && scope="(unconfigured — set with: tmux set-option -w -t ${session}:${widx} @agent-scope \"...\")"
+
+    {
+      printf '\n[agents.%s]\n' "$address"
+      printf 'host   = "%s"\n'   "$HOST_ALIAS"
+      printf 'target = "%s"\n'   "$target"
+      printf 'window = "%s"\n'   "$wname"
+      printf 'role   = "%s"\n'   "$role"
+      printf 'scope  = "%s"\n'   "$scope"
+    } >> "$tmp"
+  done < <(tmux list-windows -t "$session" -F '#{window_index}|#{window_name}')
+fi
+
+mv "$tmp" "$LOCAL_TOML"
+
+( ~/scripts/sync-agent-registry.sh >/dev/null 2>&1 & disown ) || true

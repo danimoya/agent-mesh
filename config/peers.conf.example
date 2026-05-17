@@ -1,0 +1,15 @@
+# peers.conf — members of the agent-mesh.
+#
+# One SSH alias per line. Each alias must resolve via this host's ~/.ssh/config
+# (i.e. `ssh <alias>` should connect without prompts). Include this host's own
+# alias — the script auto-skips it.
+#
+# Lines starting with '#' or blank are ignored.
+#
+# After editing, replicate this file to every peer:
+#   for p in $(grep -v '^#' peers.conf); do scp peers.conf $p:~/.agents/peers.conf; done
+#
+# Example mesh of three hosts:
+hub
+worker-1
+worker-2

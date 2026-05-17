@@ -1,0 +1,7 @@
+[Unit]
+Description=Periodic re-sync of the agent-mesh registry
+
+[Service]
+Type=oneshot
+ExecStart=%h/bin/agent-discover
+Nice=10
