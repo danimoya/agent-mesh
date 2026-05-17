@@ -50,14 +50,14 @@ jobs:
         run: |
           FORCE_SEND=1 ~/bin/notify-pane selfhost-smoketest-beta "ci-test-payload-12345"
           sleep 1
-          tmux capture-pane -p -t smoketest:beta | grep -q 'ci-test-payload-12345'
+          tmux capture-pane -p -J -t smoketest:beta | grep -q 'ci-test-payload-12345'
       - name: Send a --file and assert inbox + notification
         run: |
           echo 'manifest body' > /tmp/test-manifest.txt
           FORCE_SEND=1 ~/bin/notify-pane selfhost-smoketest-alpha --file /tmp/test-manifest.txt "fyi"
           sleep 1
           ls -la ~/.agent-inbox/
-          tmux capture-pane -p -t smoketest:alpha | grep -q 'file dropped at .*test-manifest.txt'
+          tmux capture-pane -p -J -t smoketest:alpha | grep -q 'file dropped at .*test-manifest.txt'
       - name: Assert window-rename re-registers
         run: |
           tmux rename-window -t smoketest:beta gamma

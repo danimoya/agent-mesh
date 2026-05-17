@@ -118,11 +118,11 @@ if [ -z "$host" ] || [ -z "$target" ]; then
   exit 2
 fi
 
-remote_path=""
 if [ -n "$file" ]; then
   [ -r "$file" ] || { echo "notify-pane: cannot read $file" >&2; exit 1; }
   sender=$(sender_id | tr ' []' '_')
   basename=$(basename -- "$file")
+  # shellcheck disable=SC2088
   remote_path_display="~/.agent-inbox/${sender}/${basename}"
   if is_self "$host"; then
     mkdir -p "$HOME/.agent-inbox/${sender}"
@@ -148,12 +148,12 @@ if [ "${FORCE_SEND:-}" != "1" ]; then
 fi
 
 if ! run_tmux "$host" send-keys -t "$target" -l "$tag $body"; then
-  echo "notify-pane: send-keys failed for '$agent' ($host[$target])" >&2
+  echo "notify-pane: send-keys failed for '$agent' (${host}[${target}])" >&2
   exit 4
 fi
 if ! run_tmux "$host" send-keys -t "$target" Enter; then
-  echo "notify-pane: send-keys Enter failed for '$agent' ($host[$target])" >&2
+  echo "notify-pane: send-keys Enter failed for '$agent' (${host}[${target}])" >&2
   exit 4
 fi
 
-echo "→ $agent ($host[$target]): $body"
+echo "→ $agent (${host}[${target}]): $body"

@@ -39,7 +39,11 @@ install -m 0755 "$HERE_SCRIPTS/sync-agent-registry.sh" "$DEST_SCRIPTS/sync-agent
 say "Installed scripts in $DEST_BIN/ + $DEST_SCRIPTS/"
 
 # Make sure ~/bin is on PATH for interactive shells
+# The grep pattern and the echo body intentionally contain literal $HOME — we
+# want it written to ~/.bashrc as-is so the shell expands at runtime.
+# shellcheck disable=SC2016
 if [ -f "$HOME/.bashrc" ] && ! grep -q 'PATH.*\$HOME/bin' "$HOME/.bashrc"; then
+  # shellcheck disable=SC2016
   echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc"
   say "Added $HOME/bin to PATH in ~/.bashrc"
 fi
@@ -50,7 +54,7 @@ if [ ! -f "$DEST_AGENTS/peers.conf" ]; then
   warn "Wrote example $DEST_AGENTS/peers.conf — EDIT IT with your mesh's SSH aliases."
 fi
 if [ ! -f "$DEST_AGENTS/self.conf" ]; then
-  echo "$(hostname -s)" > "$DEST_AGENTS/self.conf"
+  hostname -s > "$DEST_AGENTS/self.conf"
   warn "Wrote $DEST_AGENTS/self.conf with '$(hostname -s)'. Change it to match your peers.conf alias if different."
 fi
 touch "$DEST_AGENTS/local.toml"
