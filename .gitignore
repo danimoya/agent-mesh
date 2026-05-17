@@ -1,0 +1,4 @@
+# CI / local artifacts
+ci/keys/
+*.swp
+*.bak

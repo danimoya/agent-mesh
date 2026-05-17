@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  shellcheck:
+    name: ShellCheck (bin + scripts + install.sh)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends shellcheck
+      - name: Lint
+        run: |
+          set -e
+          shellcheck -e SC1091 bin/notify-pane bin/agent-register-hook bin/agent-discover
+          shellcheck -e SC1091 scripts/sync-agent-registry.sh
+          shellcheck -e SC1091 install.sh
+
+  smoke-singlehost:
+    name: Single-host smoke (local-self path)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install runtime deps
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tmux rsync openssh-client
+      - name: Run installer
+        run: ./install.sh
+      - name: Configure single-host mesh
+        run: |
+          echo selfhost > ~/.agents/self.conf
+          echo selfhost > ~/.agents/peers.conf
+          # Re-run discover with the now-configured aliases (install.sh ran a discover
+          # earlier with the runner's bare hostname — wipe + redo).
+          : > ~/.agents/local.toml
+      - name: Create a tmux session + windows
+        run: |
+          tmux new-session -d -s smoketest -n alpha "exec sleep 600"
+          tmux new-window  -t smoketest    -n beta  "exec sleep 600"
+          ~/bin/agent-discover
+      - name: Assert registry populated
+        run: |
+          ~/bin/notify-pane --list
+          ~/bin/notify-pane --list | grep -q '^selfhost-smoketest-alpha$'
+          ~/bin/notify-pane --list | grep -q '^selfhost-smoketest-beta$'
+      - name: Send a ping and assert delivery
+        run: |
+          FORCE_SEND=1 ~/bin/notify-pane selfhost-smoketest-beta "ci-test-payload-12345"
+          sleep 1
+          tmux capture-pane -p -t smoketest:beta | grep -q 'ci-test-payload-12345'
+      - name: Send a --file and assert inbox + notification
+        run: |
+          echo 'manifest body' > /tmp/test-manifest.txt
+          FORCE_SEND=1 ~/bin/notify-pane selfhost-smoketest-alpha --file /tmp/test-manifest.txt "fyi"
+          sleep 1
+          ls -la ~/.agent-inbox/
+          tmux capture-pane -p -t smoketest:alpha | grep -q 'file dropped at .* test-manifest.txt'
+      - name: Assert window-rename re-registers
+        run: |
+          tmux rename-window -t smoketest:beta gamma
+          # The window-renamed hook fires async via run-shell -b; give it time
+          for i in $(seq 1 10); do
+            if ~/bin/notify-pane --list | grep -q '^selfhost-smoketest-gamma$'; then break; fi
+            sleep 0.5
+          done
+          ~/bin/notify-pane --list
+          ~/bin/notify-pane --list | grep -q '^selfhost-smoketest-gamma$'
+          ~/bin/notify-pane --list | grep -v -q '^selfhost-smoketest-beta$'
+
+  smoke-twohost:
+    name: Two-host mesh (cross-container SSH + send)
+    runs-on: ubuntu-latest
+    needs: shellcheck
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build images + run test
+        run: |
+          cd ci
+          docker compose build
+          docker compose up --abort-on-container-exit --exit-code-from alpha

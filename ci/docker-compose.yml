@@ -1,0 +1,18 @@
+services:
+  alpha:
+    build:
+      context: ..
+      dockerfile: ci/Dockerfile
+    hostname: alpha
+    networks: [mesh]
+    depends_on: [beta]
+
+  beta:
+    build:
+      context: ..
+      dockerfile: ci/Dockerfile
+    hostname: beta
+    networks: [mesh]
+
+networks:
+  mesh: {}
