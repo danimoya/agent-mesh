@@ -244,6 +244,15 @@ tmux run-shell -t dev:1 "AGENT_NAME='hub-dev-tests' ~/bin/notify-pane hub-dev-bu
 
 ---
 
+## Troubleshooting
+
+### "Connection closed by invalid user … [preauth]" — Alpine + musl
+If you're building `agent-mesh` into an Alpine-based container and SSH between peers fails preauth with `invalid user <name>` (despite the user being in `/etc/passwd` and the container running as them), it's a known interaction between musl libc and OpenSSH's privsep sandbox. Switch the base image to a glibc-based one (Debian / Ubuntu / Rocky / Fedora …) or add `UsePAM yes` to `sshd_config`. Full investigation, attempts, and the two-commit fix in **[#1](https://github.com/danimoya/agent-mesh/issues/1)**.
+
+Real `agent-mesh` deployments on the canonical distros are not affected; this only bites if you containerize on Alpine.
+
+---
+
 ## Roadmap (open to PRs)
 
 - [ ] First-class pane addressing (split-view support) — `<host>-<session>-<window>-<pane-idx>`
