@@ -246,6 +246,11 @@ tmux run-shell -t dev:1 "AGENT_NAME='hub-dev-tests' ~/bin/notify-pane hub-dev-bu
 
 ## Troubleshooting
 
+### Messages eaten by a stuck Claude Code dialog (`/config`, `/help`, `/permissions`)
+A recipient pane that's currently showing a Claude Code modal — e.g. after a fleet-wide `/config reload` — captures the next `notify-pane` delivery into the dialog's search box instead of submitting it as a new prompt to the agent. As of [#2](https://github.com/danimoya/agent-mesh/issues/2), `notify-pane` detects `/config`, `/help`, and `/permissions` modals in the captured pane and sends `Escape` to dismiss them before delivering the body. Set `SKIP_DISMISS=1` to opt out.
+
+If you hit a Claude Code modal that isn't auto-dismissed: add its detection pattern to `bin/notify-pane` (search for `modal_detected`), or send `tmux send-keys -t <target> Escape` manually before retrying.
+
 ### "Connection closed by invalid user … [preauth]" — Alpine + musl
 If you're building `agent-mesh` into an Alpine-based container and SSH between peers fails preauth with `invalid user <name>` (despite the user being in `/etc/passwd` and the container running as them), it's a known interaction between musl libc and OpenSSH's privsep sandbox. Switch the base image to a glibc-based one (Debian / Ubuntu / Rocky / Fedora …) or add `UsePAM yes` to `sshd_config`. Full investigation, attempts, and the two-commit fix in **[#1](https://github.com/danimoya/agent-mesh/issues/1)**.
 

@@ -18,6 +18,9 @@
 #   AGENT_NAME      sender identity (e.g. "<host>-<session>-<window>"); auto-
 #                   detected from hostname + current tmux session if unset.
 #   FORCE_SEND=1    skip the mid-prompt safety check on the recipient.
+#   SKIP_DISMISS=1  skip the auto-Escape on detected modal dialogs (the
+#                   recipient stays in the dialog and the message lands in
+#                   whatever input field the dialog exposes).
 #
 # Exit codes:
 #   0  delivered
@@ -137,14 +140,46 @@ fi
 
 tag="[from $(sender_id) @ $(date -u +%Y-%m-%dT%H:%M:%SZ)]"
 
+# Capture once and reuse for both the mid-prompt safety check and modal
+# dismissal. -J joins wrapped lines so dialog tab strips render contiguously.
+pane=$(run_tmux "$host" capture-pane -p -J -t "$target" 2>/dev/null | tail -30 || true)
+
 if [ "${FORCE_SEND:-}" != "1" ]; then
-  pane=$(run_tmux "$host" capture-pane -p -t "$target" 2>/dev/null | tail -3 || true)
-  if echo "$pane" | grep -qE '[❯>][[:space:]]*[^[:space:]]'; then
+  if echo "$pane" | tail -3 | grep -qE '[❯>][[:space:]]*[^[:space:]]'; then
     echo "notify-pane: recipient '$agent' looks mid-prompt; refusing. Last lines:" >&2
-    echo "$pane" >&2
+    echo "$pane" | tail -3 >&2
     echo "(re-run with FORCE_SEND=1 to override)" >&2
     exit 3
   fi
+fi
+
+# Dismiss known Claude Code modals (e.g. /config, /help) by sending Escape
+# before the actual delivery. Without this, a recipient stuck in the /config
+# dialog after a fleet-wide /config reload eats the notification into its
+# search box. See https://github.com/danimoya/agent-mesh/issues/2
+#
+# Markers we recognize, narrowly scoped to avoid Escape during tool execution
+# (where it would surface an interrupt-confirmation prompt):
+#   /config  → "Status … Config … Usage … Stats" tab strip
+#   /help    → "Help" header + a "/commands" list line
+#   /permissions → "Permissions" header + "Allow" / "Deny" / "Ask" markers
+# Opt out with SKIP_DISMISS=1.
+modal_detected=""
+if [ "${SKIP_DISMISS:-}" != "1" ]; then
+  if echo "$pane" | grep -qE 'Status[[:space:]]+Config[[:space:]]+Usage[[:space:]]+Stats'; then
+    modal_detected="/config"
+  elif echo "$pane" | grep -qE '^[[:space:]]*Help[[:space:]]*$' && \
+       echo "$pane" | grep -qE '/[a-z][-a-z]+[[:space:]]'; then
+    modal_detected="/help"
+  elif echo "$pane" | grep -qE '^[[:space:]]*Permissions[[:space:]]*$' && \
+       echo "$pane" | grep -qE '(Allow|Deny|Ask)[[:space:]]'; then
+    modal_detected="/permissions"
+  fi
+fi
+if [ -n "$modal_detected" ]; then
+  echo "notify-pane: dismissing $modal_detected modal on '$agent' before delivery" >&2
+  run_tmux "$host" send-keys -t "$target" Escape
+  sleep 0.5
 fi
 
 if ! run_tmux "$host" send-keys -t "$target" -l "$tag $body"; then
