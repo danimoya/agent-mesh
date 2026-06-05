@@ -13,6 +13,9 @@
 # Role/scope:     window-level @agent-role/@agent-scope wins over session-level.
 set -euo pipefail
 
+TMUX_BIN="${TMUX_BIN:-tmux}"
+TMUX_SOCKET="${TMUX_SOCKET:-/tmp/tmux-$(id -u)/default}"
+
 action="${1:-}"
 session="${2:-}"
 [ -z "$action" ] || [ -z "$session" ] && exit 0
@@ -41,6 +44,36 @@ slug() {
             | head -c 40
 }
 
+toml_string() {
+  local s="${1:-}"
+  s=${s//$'\r'/ }
+  s=${s//$'\n'/ }
+  s=${s//\\/\\\\}
+  s=${s//\"/\\\"}
+  s=${s//$'\t'/\\t}
+  printf '"%s"' "$s"
+}
+
+infer_role() {
+  local session_name="$1" window_name="$2" command_name="$3"
+  case "$command_name" in
+    claude|claude-code) printf 'Claude Code agent in %s:%s' "$session_name" "$window_name" ;;
+    codex) printf 'Codex agent in %s:%s' "$session_name" "$window_name" ;;
+    bash|zsh|fish|sh) printf 'Shell agent in %s:%s' "$session_name" "$window_name" ;;
+    "") printf 'CLI agent in %s:%s' "$session_name" "$window_name" ;;
+    *) printf '%s agent in %s:%s' "$command_name" "$session_name" "$window_name" ;;
+  esac
+}
+
+infer_scope() {
+  local path="$1" target="$2"
+  if [ -n "$path" ]; then
+    printf 'Window target %s; current path %s' "$target" "$path"
+  else
+    printf 'Window target %s' "$target"
+  fi
+}
+
 strip_prefix() {
   awk -v pfx="$PREFIX" '
     /^\[agents\./ {
@@ -57,10 +90,10 @@ strip_prefix() {
 tmp=$(mktemp "${LOCAL_TOML}.XXXXXX")
 strip_prefix "$LOCAL_TOML" > "$tmp"
 
-if [ "$action" = "on" ] && command -v tmux >/dev/null 2>&1 \
-                       && tmux has-session -t "$session" 2>/dev/null; then
-  s_role=$(tmux  show-options -v -t "$session" @agent-role  2>/dev/null || true)
-  s_scope=$(tmux show-options -v -t "$session" @agent-scope 2>/dev/null || true)
+if [ "$action" = "on" ] && command -v "$TMUX_BIN" >/dev/null 2>&1 \
+                       && "$TMUX_BIN" -S "$TMUX_SOCKET" has-session -t "$session" 2>/dev/null; then
+  s_role=$("$TMUX_BIN" -S "$TMUX_SOCKET" show-options -v -t "$session" @agent-role  2>/dev/null || true)
+  s_scope=$("$TMUX_BIN" -S "$TMUX_SOCKET" show-options -v -t "$session" @agent-scope 2>/dev/null || true)
 
   while IFS='|' read -r widx wname; do
     [ -n "$widx" ] || continue
@@ -69,24 +102,29 @@ if [ "$action" = "on" ] && command -v tmux >/dev/null 2>&1 \
     address="${PREFIX}${wslug}"
     target="${session}:${widx}"
 
-    w_role=$(tmux  show-options -wv -t "${session}:${widx}" @agent-role  2>/dev/null || true)
-    w_scope=$(tmux show-options -wv -t "${session}:${widx}" @agent-scope 2>/dev/null || true)
+    w_role=$("$TMUX_BIN" -S "$TMUX_SOCKET" show-options -wv -t "${session}:${widx}" @agent-role  2>/dev/null || true)
+    w_scope=$("$TMUX_BIN" -S "$TMUX_SOCKET" show-options -wv -t "${session}:${widx}" @agent-scope 2>/dev/null || true)
+    pane_command=$("$TMUX_BIN" -S "$TMUX_SOCKET" display-message -p -t "${session}:${widx}" '#{pane_current_command}' 2>/dev/null || true)
+    pane_path=$("$TMUX_BIN" -S "$TMUX_SOCKET" display-message -p -t "${session}:${widx}" '#{pane_current_path}' 2>/dev/null || true)
     role="${w_role:-${s_role}}"
     scope="${w_scope:-${s_scope}}"
-    [ -z "$role"  ] && role="(unconfigured — set with: tmux set-option -w -t ${session}:${widx} @agent-role \"...\")"
-    [ -z "$scope" ] && scope="(unconfigured — set with: tmux set-option -w -t ${session}:${widx} @agent-scope \"...\")"
+    [ -z "$role"  ] && role=$(infer_role "$session" "$wname" "$pane_command")
+    [ -z "$scope" ] && scope=$(infer_scope "$pane_path" "$target")
 
     {
-      printf '\n[agents.%s]\n' "$address"
-      printf 'host   = "%s"\n'   "$HOST_ALIAS"
-      printf 'target = "%s"\n'   "$target"
-      printf 'window = "%s"\n'   "$wname"
-      printf 'role   = "%s"\n'   "$role"
-      printf 'scope  = "%s"\n'   "$scope"
+      printf '[agents.%s]\n' "$address"
+      printf 'host   = '; toml_string "$HOST_ALIAS"; printf '\n'
+      printf 'target = '; toml_string "$target"; printf '\n'
+      printf 'session = '; toml_string "$session"; printf '\n'
+      printf 'window = '; toml_string "$wname"; printf '\n'
+      printf 'role   = '; toml_string "$role"; printf '\n'
+      printf 'scope  = '; toml_string "$scope"; printf '\n'
     } >> "$tmp"
-  done < <(tmux list-windows -t "$session" -F '#{window_index}|#{window_name}')
+  done < <("$TMUX_BIN" -S "$TMUX_SOCKET" list-windows -t "$session" -F '#{window_index}|#{window_name}')
 fi
 
-mv "$tmp" "$LOCAL_TOML"
+awk 'NF' "$tmp" > "${tmp}.clean"
+mv "${tmp}.clean" "$LOCAL_TOML"
+rm -f "$tmp"
 
 ( ~/scripts/sync-agent-registry.sh >/dev/null 2>&1 & disown ) || true

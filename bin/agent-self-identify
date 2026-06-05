@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# agent-self-identify - set @agent-role/@agent-scope for the current tmux
+# window, then refresh this host's registry slice.
+#
+# Usage:
+#   agent-self-identify --role "Codex reviewer" --scope "Reviews PRs in ./src"
+#   agent-self-identify
+#
+# Env:
+#   AGENT_ROLE   default role when --role is omitted
+#   AGENT_SCOPE  default scope when --scope is omitted
+set -euo pipefail
+
+TMUX_BIN="${TMUX_BIN:-tmux}"
+TMUX_SOCKET="${TMUX_SOCKET:-/tmp/tmux-$(id -u)/default}"
+
+role="${AGENT_ROLE:-}"
+scope="${AGENT_SCOPE:-}"
+target=""
+
+usage() {
+  sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//' >&2
+  exit 1
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --role)
+      role="${2:-}"; shift 2 ;;
+    --scope)
+      scope="${2:-}"; shift 2 ;;
+    -t|--target)
+      target="${2:-}"; shift 2 ;;
+    -h|--help)
+      usage ;;
+    *)
+      echo "agent-self-identify: unknown argument '$1'" >&2
+      usage ;;
+  esac
+done
+
+if [ -z "$target" ]; then
+  target=$("$TMUX_BIN" -S "$TMUX_SOCKET" display-message -p '#S:#{window_index}' 2>/dev/null || true)
+fi
+[ -n "$target" ] || { echo "agent-self-identify: no tmux window target found" >&2; exit 1; }
+
+session="${target%%:*}"
+window=$("$TMUX_BIN" -S "$TMUX_SOCKET" display-message -p -t "$target" '#{window_name}' 2>/dev/null || true)
+command_name=$("$TMUX_BIN" -S "$TMUX_SOCKET" display-message -p -t "$target" '#{pane_current_command}' 2>/dev/null || true)
+pane_path=$("$TMUX_BIN" -S "$TMUX_SOCKET" display-message -p -t "$target" '#{pane_current_path}' 2>/dev/null || true)
+
+if [ -z "$role" ]; then
+  case "$command_name" in
+    claude|claude-code) role="Claude Code agent in ${session}:${window}" ;;
+    codex) role="Codex agent in ${session}:${window}" ;;
+    bash|zsh|fish|sh) role="Shell agent in ${session}:${window}" ;;
+    "") role="CLI agent in ${session}:${window}" ;;
+    *) role="${command_name} agent in ${session}:${window}" ;;
+  esac
+fi
+
+if [ -z "$scope" ]; then
+  repo_root=""
+  if [ -n "$pane_path" ] && command -v git >/dev/null 2>&1; then
+    repo_root=$(git -C "$pane_path" rev-parse --show-toplevel 2>/dev/null || true)
+  fi
+  if [ -n "$repo_root" ]; then
+    scope="Works in $(basename "$repo_root") at $repo_root"
+  elif [ -n "$pane_path" ]; then
+    scope="Works from $pane_path"
+  else
+    scope="Window target $target"
+  fi
+fi
+
+"$TMUX_BIN" -S "$TMUX_SOCKET" set-option -w -t "$target" @agent-role "$role"
+"$TMUX_BIN" -S "$TMUX_SOCKET" set-option -w -t "$target" @agent-scope "$scope"
+
+hook="${AGENT_REGISTER_HOOK:-$HOME/bin/agent-register-hook}"
+if [ ! -x "$hook" ]; then
+  hook="$(cd "$(dirname "$0")" && pwd)/agent-register-hook"
+fi
+"$hook" on "$session"
+
+printf 'agent-self-identify: %s role="%s" scope="%s"\n' "$target" "$role" "$scope"

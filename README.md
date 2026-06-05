@@ -165,6 +165,9 @@ notify-pane --list   # should show every window across every host
 notify-pane <agent> "<body>"
 ```
 
+`<agent>` can be the full mesh address (`hub-dev-build`) or a window name
+when that window name is unique in `registry.toml`.
+
 ### Send a file (with optional text)
 
 ```bash
@@ -181,7 +184,16 @@ notify-pane --whoami    # this shell's sender id
 
 ### Set role/scope on a window
 
-The hook fills role/scope with placeholders. Make them meaningful:
+Agents can advertise themselves from inside their tmux window:
+
+```bash
+agent-self-identify --role "Codex reviewer" --scope "Reviews shell changes in agent-mesh"
+```
+
+With no flags, `agent-self-identify` infers a role/scope from the current
+command, window, and working tree. It writes window-level `@agent-role` and
+`@agent-scope`, then re-registers the session immediately. Manual tmux options
+still work when you want exact wording:
 
 ```bash
 tmux set-option -w -t dev:0 @agent-role  "Test runner — Jest + Playwright"
@@ -221,6 +233,7 @@ tmux run-shell -t dev:1 "AGENT_NAME='hub-dev-tests' ~/bin/notify-pane hub-dev-bu
 ~/bin/notify-pane                           # the wrapper
 ~/bin/agent-register-hook                   # tmux hook handler (on/off <session>)
 ~/bin/agent-discover                        # one-shot session+window sweep
+~/bin/agent-self-identify                   # set role/scope from an agent pane
 ~/scripts/sync-agent-registry.sh            # peer-fragment assembly + push
 ~/.agents/peers.conf                        # mesh membership (you edit)
 ~/.agents/self.conf                         # this host's alias (you edit)

@@ -16,7 +16,7 @@ jobs:
       - name: Lint
         run: |
           set -e
-          shellcheck -e SC1091 bin/notify-pane bin/agent-register-hook bin/agent-discover
+          shellcheck -e SC1091 bin/notify-pane bin/agent-register-hook bin/agent-discover bin/agent-self-identify
           shellcheck -e SC1091 scripts/sync-agent-registry.sh
           shellcheck -e SC1091 install.sh
 

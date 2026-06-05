@@ -35,6 +35,7 @@ mkdir -p "$DEST_BIN" "$DEST_SCRIPTS" "$DEST_AGENTS"
 install -m 0755 "$HERE_BIN/notify-pane"           "$DEST_BIN/notify-pane"
 install -m 0755 "$HERE_BIN/agent-register-hook"   "$DEST_BIN/agent-register-hook"
 install -m 0755 "$HERE_BIN/agent-discover"        "$DEST_BIN/agent-discover"
+install -m 0755 "$HERE_BIN/agent-self-identify"   "$DEST_BIN/agent-self-identify"
 install -m 0755 "$HERE_SCRIPTS/sync-agent-registry.sh" "$DEST_SCRIPTS/sync-agent-registry.sh"
 say "Installed scripts in $DEST_BIN/ + $DEST_SCRIPTS/"
 

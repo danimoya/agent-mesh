@@ -57,7 +57,58 @@ lookup() {
   ' "$REGISTRY"
 }
 
+slug() {
+  echo "$1" | tr '[:upper:]' '[:lower:]' \
+            | sed 's/[^a-z0-9]\+/-/g; s/^-//; s/-$//' \
+            | head -c 40
+}
+
+agent_exists() {
+  local name="$1"
+  awk -v want="$name" '
+    /^\[agents\./ {
+      h = $0; gsub(/[][]/, "", h); split(h, a, ".")
+      if (a[1] == "agents" && a[2] == want) found = 1
+    }
+    END { if (found) exit 0; exit 1 }
+  ' "$REGISTRY"
+}
+
+resolve_agent() {
+  local name="$1" name_slug
+  [ -r "$REGISTRY" ] || return 1
+  if agent_exists "$name"; then
+    printf '%s\n' "$name"
+    return 0
+  fi
+
+  name_slug=$(slug "$name")
+  awk -v want="$name" -v want_slug="$name_slug" '
+    function make_slug(s) {
+      s = tolower(s)
+      gsub(/[^a-z0-9]+/, "-", s)
+      sub(/^-/, "", s)
+      sub(/-$/, "", s)
+      return substr(s, 1, 40)
+    }
+    /^\[agents\./ {
+      h = $0; gsub(/[][]/, "", h); split(h, a, ".")
+      agent = a[2]
+      in_block = (a[1] == "agents")
+      next
+    }
+    /^\[/ { in_block = 0 }
+    in_block && /^[[:space:]]*window[[:space:]]*=/ {
+      value = $0
+      sub(/^[^=]*=[[:space:]]*/, "", value)
+      gsub(/^"|"$/, "", value)
+      if (value == want || make_slug(value) == want_slug) print agent
+    }
+  ' "$REGISTRY" | sort -u
+}
+
 list_agents() {
+  [ -r "$REGISTRY" ] || return 0
   sed -n 's/^\[agents\.\([^]]\+\)\].*/\1/p' "$REGISTRY"
 }
 
@@ -73,11 +124,16 @@ sender_id() {
   if [ -n "${AGENT_NAME:-}" ]; then echo "$AGENT_NAME"; return; fi
   local h s
   h=$(self_alias)
-  if s=$(tmux -S "$TMUX_SOCKET" display-message -p '#S' 2>/dev/null); then
+  if s=$("$TMUX_BIN" -S "$TMUX_SOCKET" display-message -p '#S' 2>/dev/null); then
     echo "${h}[${s}]"
   else
     echo "$h"
   fi
+}
+
+safe_component() {
+  printf '%s' "$1" | tr '[:space:]' '_' \
+    | sed 's/[^A-Za-z0-9._-]/_/g; s/__*/_/g; s/^_*//; s/_*$//'
 }
 
 is_self() {
@@ -114,6 +170,26 @@ if [ -z "$agent" ] || { [ -z "$body" ] && [ -z "$file" ]; }; then
   usage
 fi
 
+matches=()
+mapfile -t matches < <(resolve_agent "$agent" || true)
+case "${#matches[@]}" in
+  0)
+    echo "notify-pane: unknown agent or unique window '$agent' - try --list" >&2
+    exit 2
+    ;;
+  1)
+    if [ "${matches[0]}" != "$agent" ]; then
+      echo "notify-pane: resolved '$agent' to '${matches[0]}'" >&2
+      agent="${matches[0]}"
+    fi
+    ;;
+  *)
+    echo "notify-pane: window name '$agent' is ambiguous; use one of:" >&2
+    printf '  %s\n' "${matches[@]}" >&2
+    exit 2
+    ;;
+esac
+
 host=$(lookup "$agent" "host")
 target=$(lookup "$agent" "target")
 if [ -z "$host" ] || [ -z "$target" ]; then
@@ -123,16 +199,21 @@ fi
 
 if [ -n "$file" ]; then
   [ -r "$file" ] || { echo "notify-pane: cannot read $file" >&2; exit 1; }
-  sender=$(sender_id | tr ' []' '_')
-  basename=$(basename -- "$file")
+  sender=$(safe_component "$(sender_id)")
+  [ -n "$sender" ] || sender="unknown"
+  basename=$(safe_component "$(basename -- "$file")")
+  [ -n "$basename" ] || basename="file"
   # shellcheck disable=SC2088
   remote_path_display="~/.agent-inbox/${sender}/${basename}"
   if is_self "$host"; then
     mkdir -p "$HOME/.agent-inbox/${sender}"
+    chmod 700 "$HOME/.agent-inbox" "$HOME/.agent-inbox/${sender}" 2>/dev/null || true
     cp -f "$file" "$HOME/.agent-inbox/${sender}/${basename}"
+    chmod 600 "$HOME/.agent-inbox/${sender}/${basename}" 2>/dev/null || true
   else
-    ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" "mkdir -p ~/.agent-inbox/${sender}"
+    ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" "mkdir -p ~/.agent-inbox/${sender} && chmod 700 ~/.agent-inbox ~/.agent-inbox/${sender}"
     scp -q -o BatchMode=yes -o ConnectTimeout=5 "$file" "$host:.agent-inbox/${sender}/${basename}"
+    ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" "chmod 600 ~/.agent-inbox/${sender}/${basename}" || true
   fi
   drop_note="file dropped at ${remote_path_display} ($(wc -c < "$file") bytes)"
   if [ -n "$body" ]; then body="${drop_note}: ${body}"; else body="${drop_note}"; fi

@@ -4,12 +4,21 @@
 # a missed hook. Idempotent.
 set -euo pipefail
 
+TMUX_BIN="${TMUX_BIN:-tmux}"
 TMUX_SOCKET="${TMUX_SOCKET:-/tmp/tmux-$(id -u)/default}"
+LOCAL_TOML="${HOME}/.agents/local.toml"
+mkdir -p "$(dirname "$LOCAL_TOML")"
 
-if ! tmux -S "$TMUX_SOCKET" ls >/dev/null 2>&1; then
+if ! "$TMUX_BIN" -S "$TMUX_SOCKET" ls >/dev/null 2>&1; then
   echo "agent-discover: no tmux server on $TMUX_SOCKET"
+  : > "$LOCAL_TOML"
+  ~/scripts/sync-agent-registry.sh || true
   exit 0
 fi
+
+# Discovery is authoritative: rebuild this host's slice from live tmux state so
+# the safety-net timer also removes sessions whose close hook was missed.
+: > "$LOCAL_TOML"
 
 n_s=0
 n_w=0
@@ -17,8 +26,8 @@ while IFS= read -r s; do
   [ -n "$s" ] || continue
   ~/bin/agent-register-hook on "$s"
   n_s=$((n_s+1))
-  n_w=$((n_w + $(tmux -S "$TMUX_SOCKET" list-windows -t "$s" 2>/dev/null | wc -l)))
-done < <(tmux -S "$TMUX_SOCKET" ls -F '#{session_name}')
+  n_w=$((n_w + $("$TMUX_BIN" -S "$TMUX_SOCKET" list-windows -t "$s" 2>/dev/null | wc -l)))
+done < <("$TMUX_BIN" -S "$TMUX_SOCKET" ls -F '#{session_name}')
 
 echo "agent-discover: ${n_s} session(s), ${n_w} window(s) on $(hostname -s); running sync"
 ~/scripts/sync-agent-registry.sh
